@@ -8,52 +8,52 @@
 #   - Ensures no residual GCP resources remain after cleanup
 # ==========================================================================================
 
-# ------------------------------------------------------------------------------------------
-# Phase 1: RStudio Cluster Teardown
-# - Destroys the RStudio cluster using the latest built image
-# ------------------------------------------------------------------------------------------
+# # ------------------------------------------------------------------------------------------
+# # Phase 1: RStudio Cluster Teardown
+# # - Destroys the RStudio cluster using the latest built image
+# # ------------------------------------------------------------------------------------------
 
-rstudio_image=$(gcloud compute images list \
-  --filter="name~'^rstudio-image' AND family=rstudio-images" \
-  --sort-by="~creationTimestamp" \
-  --limit=1 \
-  --format="value(name)")
+# rstudio_image=$(gcloud compute images list \
+#   --filter="name~'^rstudio-image' AND family=rstudio-images" \
+#   --sort-by="~creationTimestamp" \
+#   --limit=1 \
+#   --format="value(name)")
 
-if [[ -z "$rstudio_image" ]]; then
-  echo "ERROR: No latest image found for 'rstudio-image' in family 'rstudio-images'."
-  exit 1
-fi
+# if [[ -z "$rstudio_image" ]]; then
+#   echo "ERROR: No latest image found for 'rstudio-image' in family 'rstudio-images'."
+#   exit 1
+# fi
 
-cd 04-cluster
+# cd 04-cluster
 
-terraform init
-terraform destroy \
-  -var="rstudio_image_name=$rstudio_image" \
-  -auto-approve
+# terraform init
+# terraform destroy \
+#   -var="rstudio_image_name=$rstudio_image" \
+#   -auto-approve
 
-cd .. # Return to project root
+# cd .. # Return to project root
 
 # ------------------------------------------------------------------------------------------
 # Phase 2: Custom Image Cleanup
 # - Deletes Packer-built images with known prefixes (rstudio)
-# ------------------------------------------------------------------------------------------
+# # ------------------------------------------------------------------------------------------
 
-echo "NOTE: Fetching images starting with 'rstudio' to delete..."
+# echo "NOTE: Fetching images starting with 'rstudio' to delete..."
 
-image_list=$(gcloud compute images list \
-  --format="value(name)" \
-  --filter="name~'^(rstudio)'") # Regex match for prefix
+# image_list=$(gcloud compute images list \
+#   --format="value(name)" \
+#   --filter="name~'^(rstudio)'") # Regex match for prefix
 
-if [ -z "$image_list" ]; then
-  echo "NOTE: No images found starting with 'rstudio'. Nothing to delete."
-else
-  echo "NOTE: Deleting images..."
-  for image in $image_list; do
-    echo "NOTE: Deleting image: $image"
-    gcloud compute images delete "$image" --quiet \
-      || echo "WARNING: Failed to delete image: $image"
-  done
-fi
+# if [ -z "$image_list" ]; then
+#   echo "NOTE: No images found starting with 'rstudio'. Nothing to delete."
+# else
+#   echo "NOTE: Deleting images..."
+#   for image in $image_list; do
+#     echo "NOTE: Deleting image: $image"
+#     gcloud compute images delete "$image" --quiet \
+#       || echo "WARNING: Failed to delete image: $image"
+#   done
+# fi
 
 # ------------------------------------------------------------------------------------------
 # Phase 3: Server Teardown

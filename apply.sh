@@ -56,6 +56,8 @@ cd .. # Return to project root
 # - Builds a custom Compute Engine image with RStudio using Packer
 # ------------------------------------------------------------------------------------------
 
+exit 0
+
 project_id=$(jq -r '.project_id' "./credentials.json")
 
 # Authenticate with service account from credentials file
