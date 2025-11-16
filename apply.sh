@@ -77,16 +77,23 @@ project_id=$(jq -r '.project_id' "../credentials.json")
 
 GCR_IMAGE=us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio:rc1
 
-IMAGE_PATH="us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio"
-IMAGE_TAG="rc1"
+TAG_EXISTS=$(
+  gcloud artifacts docker tags list \
+    us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio \
+    --format="value(tag)" | grep -x "rc1" || true
+)
 
-cd rstudio
-docker build \
-     --build-arg RSTUDIO_PASSWORD="${RSTUDIO_PASSWORD}" \
-     -t $GCR_IMAGE . 
-docker push $GCR_IMAGE
+if [[ -n "$TAG_EXISTS" ]]; then
+    echo "NOTE: RStudio image/tag exists."
+else
+  cd rstudio
+  docker build \
+       --build-arg RSTUDIO_PASSWORD="${RSTUDIO_PASSWORD}" \
+       -t $GCR_IMAGE . 
+  docker push $GCR_IMAGE
+  cd ..
+fi
 
-cd ..
 cd ..
 
 exit 0
