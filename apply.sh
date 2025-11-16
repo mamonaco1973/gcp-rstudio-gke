@@ -52,10 +52,13 @@ cd .. # Return to project root
 
 
 # ------------------------------------------------------------------------------------------
-# Phase 3: RStudio Image Build
-# - Builds a custom Compute Engine image with RStudio using Packer
+# Phase 3: RStudio Docker Image Build
+# - Builds a custom Docker image with RStudio
 # ------------------------------------------------------------------------------------------
 
+secretValue=$(gcloud secrets versions access latest --secret="rstudio-credentials")
+RSTUDIO_PASSWORD=$(echo $secretValue | jq -r '.password')      # Extract password
+echo $RSTUDIO_PASSWORD  
 exit 0
 
 project_id=$(jq -r '.project_id' "./credentials.json")
