@@ -165,7 +165,7 @@ resource "random_password" "rstudio_password" {
 }
 
 resource "google_secret_manager_secret" "rstudio_secret" {
-  secret_id = "rstudio-ad-credentials"
+  secret_id = "rstudio-credentials"
 
   replication {
     auto {}
