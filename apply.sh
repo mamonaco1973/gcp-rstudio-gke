@@ -58,24 +58,33 @@ cd .. # Return to project root
 
 secretValue=$(gcloud secrets versions access latest --secret="rstudio-credentials")
 RSTUDIO_PASSWORD=$(echo $secretValue | jq -r '.password')      # Extract password
-echo $RSTUDIO_PASSWORD  
+
+if [ -z "$RSTUDIO_PASSWORD" ] || [ "$RSTUDIO_PASSWORD" = "null" ]; then
+  echo "ERROR: Failed to retrieve RStudio password."
+  exit 1
+fi
+
+
+# Move into the Docker setup directory where all container builds occur.
+cd "03-docker"
+echo "NOTE: Building rstudio container with Docker."
+
+# Authenticate Docker with Google Artifact Registry for the specified region.
+gcloud auth configure-docker us-central1-docker.pkg.dev -q 
+
+# Extract the GCP project ID from the credentials JSON file.
+project_id=$(jq -r '.project_id' "../credentials.json")
+
+GCR_IMAGE=us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio:rc1
+
+cd rstudio
+docker build \
+     --build-arg RSTUDIO_PASSWORD="${RSTUDIO_PASSWORD}" \
+     -t $GCR_IMAGE . --push
+cd ..
+cd ..
+
 exit 0
-
-project_id=$(jq -r '.project_id' "./credentials.json")
-
-# Authenticate with service account from credentials file
-gcloud auth activate-service-account \
-  --key-file="./credentials.json" > /dev/null 2> /dev/null
-
-# Export path for Google credentials (used by Packer)
-export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/credentials.json"
-
-cd 03-packer
-packer build \
-  -var="project_id=$project_id" \
-  rstudio_image.pkr.hcl
-cd .. # Return to project root
-
 
 # ------------------------------------------------------------------------------------------
 # Phase 4: RStudio Cluster Deployment
