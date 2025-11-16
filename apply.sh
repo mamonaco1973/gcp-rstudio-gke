@@ -80,17 +80,13 @@ GCR_IMAGE=us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio:rc1
 IMAGE_PATH="us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio"
 IMAGE_TAG="rc1"
 
-if gcloud artifacts docker images list "$IMAGE_PATH" \
-    --format="get(TAGS)" | grep -qx "$IMAGE_TAG"; then
-    echo "NOTE: Image already exists: ${IMAGE_PATH}:${IMAGE_TAG}"
-else
-  cd rstudio
-  docker build \
-       --build-arg RSTUDIO_PASSWORD="${RSTUDIO_PASSWORD}" \
-       -t $GCR_IMAGE . --push
-  cd ..
-fi
+cd rstudio
+docker build \
+     --build-arg RSTUDIO_PASSWORD="${RSTUDIO_PASSWORD}" \
+     -t $GCR_IMAGE . 
+docker push $GCR_IMAGE
 
+cd ..
 cd ..
 
 exit 0
