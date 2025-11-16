@@ -153,6 +153,33 @@ resource "google_secret_manager_secret_version" "akumar_secret_version" {
   })
 }
 
+# ================================================================================================
+# User: rstudio local debug account
+# ================================================================================================
+# Generates password and store credentials for local rstudio debug account
+# ================================================================================================
+resource "random_password" "rstudio_password" {
+  length           = 24
+  special          = true
+  override_special = "!@#$%"
+}
+
+resource "google_secret_manager_secret" "rstudio_secret" {
+  secret_id = "rstudio-ad-credentials"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "rstudio_secret_version" {
+  secret = google_secret_manager_secret.rstudio_secret.id
+  secret_data = jsonencode({
+    username = "rstudio"
+    password = random_password.rstudio_password.result
+  })
+}
+
 
 # ================================================================================================
 # Locals: Secret List
@@ -165,7 +192,8 @@ locals {
     google_secret_manager_secret.edavis_secret.secret_id,
     google_secret_manager_secret.rpatel_secret.secret_id,
     google_secret_manager_secret.akumar_secret.secret_id,
-    google_secret_manager_secret.admin_secret.secret_id
+    google_secret_manager_secret.admin_secret.secret_id,
+    google_secret_manager_secret.rstudio_secret.secret_id
   ]
 }
 
