@@ -106,6 +106,19 @@ terraform init
 terraform apply \
   -auto-approve
 
+export rstudio_image="${GCR_IMAGE}"
+export project_id="${project_id}"
+export filestore_ip=$(gcloud filestore instances describe nfs-server \
+  --zone=us-central1-b \
+  --project=${project_id} \
+  --format="value(networks[0].ipAddresses[0])")
+export filestore_share="filestore"
+
+envsubst < yaml/rstudio-app.yaml.tmpl > ../rstudio-app.yaml || {
+    echo "ERROR: Failed to generate Kubernetes deployment file. Exiting."
+    exit 1
+}
+
 cd .. # Return to project root
 
 # ------------------------------------------------------------------------------------------
