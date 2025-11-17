@@ -61,3 +61,27 @@ resource "google_service_account" "rstudio_gsa" {
   account_id   = "rstudio-rw"
   display_name = "RStudio GSA for reading secrets"
 }
+
+
+resource "kubernetes_service_account" "rstudio_ksa" {
+  metadata {
+    name      = "rstudio-sa"
+    namespace = "default"
+
+    annotations = {
+      "iam.gke.io/gcp-service-account" = google_service_account.rstudio_gsa.email
+    }
+  }
+}
+
+resource "google_service_account_iam_member" "wi_binding" {
+  service_account_id = google_service_account.rstudio_gsa.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${local.credentials.project_id}.svc.id.goog[default/rstudio-sa]"
+}
+
+resource "google_project_iam_member" "secret_access" {
+  project = local.credentials.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.rstudio_gsa.email}"
+}
