@@ -44,25 +44,15 @@ domain_fqdn=$(cat /etc/rstudio-config/domain_fqdn)
 dbus-daemon --system --fork
 
 # ==============================================================================
-# Retrieve AD Credentials from Azure Key Vault
+# Retrieve AD Credentials from GCP Secrets Manager
 # ------------------------------------------------------------------------------
 # Secret JSON format:
 #   { "username": "MCLOUD\\Admin", "password": "SuperSecurePass123" }
 # ==============================================================================
-log INFO "Retrieving AD join credentials from Vault..."
 
-az login \
-  --federated-token "$(cat $AZURE_FEDERATED_TOKEN_FILE)" \
-  --service-principal \
-  --username "$AZURE_CLIENT_ID" \
-  --tenant "$AZURE_TENANT_ID" \
-  --allow-no-subscriptions
-
-secretsJson=$(az keyvault secret show \
-  --name ${admin_secret} \
-  --vault-name ${vault_name} \
-  --query value -o tsv)
-admin_password=$(echo "$secretsJson" | jq -r '.password')
+log INFO "Retrieving AD join credentials from GCP Secrets Manager..."
+secretValue=$(gcloud secrets versions access latest --secret="$admin_secret")
+admin_password=$(echo $secretValue | jq -r '.password')      # Extract password
 admin_username="Admin"
 
 # ==============================================================================
