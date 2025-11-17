@@ -169,8 +169,7 @@ resource "kubernetes_service_account" "rstudio_ksa" {
     namespace = "default"
 
     annotations = {
-      "iam.gke.io/gcp-service-account" =
-        google_service_account.rstudio_gsa.email
+      "iam.gke.io/gcp-service-account" =google_service_account.rstudio_gsa.email
     }
   }
 }
@@ -190,8 +189,8 @@ resource "google_service_account_iam_member" "wi_binding" {
   service_account_id = google_service_account.rstudio_gsa.name
   role               = "roles/iam.workloadIdentityUser"
 
-  member = "serviceAccount:${local.credentials.project_id}.svc.id.goog[" +
-           "default/rstudio-sa]"
+  member = "serviceAccount:${local.credentials.project_id}.svc.id.goog[default/rstudio-sa]"
+
 }
 
 # ==============================================================================
