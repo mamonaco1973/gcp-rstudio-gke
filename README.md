@@ -1,41 +1,48 @@
-# GCP RStudio Cluster with Filestore-Backed Shared Libraries  
+# GCP RStudio Cluster on GKE with Active Directory and NFS Integration
 
-This project extends the original **GCP Mini Active Directory** lab by deploying an **RStudio Server cluster** on Google Cloud Platform. The cluster is designed for data science and analytics workloads, where multiple users need a scalable, domain-joined environment with consistent package management.  
+This project builds on both the **GCP Mini Active Directory** and **RStudio VM Cluster** lab components to deliver a **cloud-native, domain-joined RStudio Server environment** running on **Google Kubernetes Engine (GKE)**.
 
-![RStudio](rstudio.png)  
+![RStudio](rstudio.png)
 
-Instead of relying only on per-user libraries stored on ephemeral VM disks, this solution integrates **Google Cloud Filestore** as a shared package and data backend. This allows RStudio nodes in a **Managed Instance Group (MIG)** to mount a common NFS share, ensuring that installed R packages and project files are accessible across all nodes.  
+It uses **Terraform**, **Docker**, **Helm**, and **Kubernetes manifests** to create a fully automated analytics platform that integrates with:
 
-### Key capabilities demonstrated:  
+- **Active Directory authentication** (via a Samba-based Mini-AD Domain Controller running on GCE)  
+- **NFS-backed persistent storage** (via a Linux NFS gateway VM exporting `/nfs/home`, `/nfs/data`, `/nfs/rlibs`)  
+- **GKE Workload Identity** for secure, secretless pod-level access to Google APIs such as Secret Manager  
+- **Google Artifact Registry (GAR)** for hosting the custom RStudio Server container image  
+- A **template-driven Kubernetes manifest (`rstudio-app.yaml`)** rendered by Terraform and applied via `kubectl` to deploy the RStudio StatefulSet, PersistentVolume, PersistentVolumeClaim, Service, and Ingress
 
-1. **RStudio Server Cluster with Global HTTP Load Balancer** – RStudio Server (Open Source Edition) deployed across multiple Compute Engine instances, fronted by a GCP global HTTP(S) load balancer for high availability and seamless user access.  
-2. **Filestore-Backed Shared Library** – Filestore NFS share mounted at `/nfs/rlibs` and injected into `.libPaths()`, enabling shared R package storage across the cluster.  
-3. **Mini Active Directory Integration** – A Samba-based mini-AD domain controller provides authentication and DNS, so RStudio logins are domain-based and centrally managed.  
+Unlike VM-based scaling groups, this solution deploys **containerized RStudio Server pods** on GKE that join the domain at runtime and mount **NFS volumes** for user home directories, project data, and shared R package storage.
 
-Together, this architecture provides a reproducible, cloud-native RStudio environment where users get both personal home-directory libraries and access to a shared, scalable package repository.  
+Key capabilities demonstrated:
 
-![GCP RStudio Cluster](gcp-rstudio-cluster.png)  
+1. **GKE-Hosted RStudio Server** – RStudio Server (Open Source Edition) runs as containers on Google Kubernetes Engine for elasticity, rapid scaling, and resilient self-healing.  
+2. **Active Directory Authentication** – Pods authenticate against a Samba-based Active Directory domain, providing consistent identity control across users and sessions.  
+3. **NFS Persistent Storage** – User home folders and shared R library paths are mounted from an NFS gateway VM, ensuring cross-pod consistency and reproducible analytics environments.  
+4. **NGINX Ingress with Global Static IP** – Provides external access, session affinity, simplified routing, and integration with the GCP external HTTP(S) load balancing stack.  
+5. **End-to-End Infrastructure as Code** – Terraform builds the Mini-AD, networking, firewall rules, NFS gateway, Artifact Registry, GKE cluster, Workload Identity bindings, and NGINX ingress; Docker builds the RStudio image; the **Terraform-rendered `rstudio-app.yaml` manifest is applied with `kubectl`** to deploy the complete RStudio workload.
+
+Together, these components form a scalable, domain-aware analytics platform where RStudio users share packages, data, and authentication seamlessly across a fully managed Google Kubernetes environment.
+
+![diagram](gcp-rstudio-gke.png)
 
 ## Prerequisites
 
 * [A Google Cloud Account](https://console.cloud.google.com/)
 * [Install gcloud CLI](https://cloud.google.com/sdk/docs/install) 
-* [Install Latest Terraform](https://developer.hashicorp.com/terraform/install)
-* [Install Latest Packer](https://developer.hashicorp.com/packer/install)
+* [Install Terraform](https://developer.hashicorp.com/terraform/install)
+* [Install kubectl](https://kubernetes.io/docs/tasks/tools/)
+* [Install Docker](https://docs.docker.com/engine/install/)
 
 If this is your first time watching our content, we recommend starting with this video: [GCP + Terraform: Easy Setup](https://youtu.be/3spJpYX4f7I). It provides a step-by-step guide to properly configure Terraform, Packer, and the gcloud CLI.
-
-## Build WorkFlow
-
-![Build WorkFlow](build-workflow.png)
 
 ## Download this Repository  
 
 Clone the repository from GitHub and move into the project directory:  
 
 ```bash
-git clone https://github.com/mamonaco1973/gcp-rstudio-cluster.git
-cd gcp-rstudio-cluster
+git clone https://github.com/mamonaco1973/gcp-rstudio-gke.git
+cd gcp-rstudio-gke
 ```  
 
 
@@ -44,7 +51,7 @@ cd gcp-rstudio-cluster
 Run [check_env](check_env.sh) to validate your environment, then run [apply](apply.sh) to provision the infrastructure.  
 
 ```bash
-develop-vm:~/gcp-rstudio-cluster$ ./apply.sh
+develop-vm:~/gcp-rstudio-gke$ ./apply.sh
 NOTE: Validating that required commands are in PATH.
 NOTE: gcloud is found in the current PATH.
 NOTE: terraform is found in the current PATH.
@@ -54,40 +61,56 @@ NOTE: Successfully authenticated with GCP.
 Initializing provider plugins...
 Terraform has been successfully initialized!
 ```  
-## Build Results  
+### Build Results
 
-When the deployment completes, the following resources are created:  
+When the deployment completes, the following resources are created:
 
 - **Networking:**  
-  - A custom VPC with dedicated subnets for Active Directory, MIG cluster nodes, and NFS Gateway.  
-  - Route tables and firewall rules configured for outbound internet access, AD lookups, and Filestore access  
+  - A custom VPC with segmented subnets for Active Directory, GKE nodes, the NFS gateway VM, and the application tier  
+  - Cloud NAT providing controlled outbound internet access for private GKE nodes  
+  - Firewall rules allowing SSH, HTTP/HTTPS ingress, NFS (2049/TCP), Kerberos/LDAP, and AD domain join traffic  
+  - DNS resolution handled by the Mini Active Directory domain controller and GCP Cloud DNS as needed  
 
-- **Security & Identity:**  
-  - Firewall rules scoped to domain controller, MIG nodes, and NFS gateway  
-  - Google Secret Manager entries for administrator and user credentials  
-  - Service accounts and IAM roles for MIG instances to securely fetch secrets  
+- **Identity, Security & Secret Manager:**  
+  - Google Secret Manager storing AD administrator credentials, RStudio service account secrets, and deployment parameters  
+  - GKE **Workload Identity** enabling pods to securely access Secret Manager and Google APIs without Kubernetes secrets  
+  - IAM bindings granting RStudio pods least-privilege access to GAR, Secret Manager, and logging APIs  
+  - Firewall boundaries and IAM scoping enforce secure, segmented communication throughout the environment  
 
-- **Active Directory Server:**  
-  - Ubuntu VM running Samba 4 as Domain Controller and DNS server  
-  - Configured Kerberos realm and NetBIOS name for authentication  
-  - Administrator credentials securely stored in Secret Manager  
+- **Active Directory Domain:**  
+  - A Samba-based “Mini-AD” domain controller deployed on a Google Compute Engine VM  
+  - Provides Kerberos, LDAP, and DNS services for the cluster  
+  - Fully integrated with RStudio pods so users authenticate via domain credentials at login  
 
-- **RStudio Cluster (MIG):**  
-  - Linux Managed Instance Group (MIG) hosting RStudio Server nodes built from a Packer-generated custom image  
-  - Global HTTP(S) Load Balancer providing public access, load balancing, health checks, and optional session affinity  
-  - Autoscaling policies to add/remove RStudio nodes based on CPU utilization  
+- **NFS Persistent Storage:**  
+  - A dedicated Linux NFS gateway VM exporting persistent directories including:  
+    - User home directories (`/nfs/home`)  
+    - Shared data paths (`/nfs/data`)  
+    - Shared R library directories (`/nfs/rlibs`)  
+  - Firewall rules enforce secure NFS mount traffic between GKE nodes and the gateway VM  
+  - Ensures consistent user environments across all RStudio pods  
 
-- **Filestore Storage:**  
-  - Google Cloud Filestore instance providing an NFSv3 share  
-  - Mounted at `/nfs/rlibs` for shared R libraries and optionally `/nfs/home` for user home directories  
+- **GKE Cluster & Node Pool:**  
+  - A Google Kubernetes Engine (GKE) cluster deployed via Terraform  
+  - Node pools sized and labeled for RStudio compute workloads  
+  - Workload Identity enabled for secure Artifact Registry pulls and Secret Manager access  
+  - Autoscaling support ensures efficient, cost-optimized scheduling of RStudio sessions  
 
-- **File Access Integration:**  
-  - RStudio MIG instances mount the Filestore NFS share for shared R libraries and project data  
-  - A Linux gateway can optionally expose the same Filestore backend via Samba for Windows clients  
-  - This provides a unified storage backend across Linux (NFS) and Windows (SMB) clients  
+- **RStudio Application:**  
+  - RStudio Server (Open Source Edition) deployed as a Kubernetes StatefulSet and Service  
+  - NGINX Ingress Controller provides the external entrypoint, backed by a reserved Global Static IP  
+  - Ingress routing (including `/auth-sign-in`) ensures proper health checks and session management  
+  - Pods domain-join at startup and mount **NFS directories** for home folders, shared R packages, and project storage  
+  - Provides high availability, reproducibility, and secure multi-user access tied to Active Directory  
+
+- **Automation & Validation:**  
+  - Terraform modules orchestrate dependency ordering across networking, directory services, NFS, GKE, and application layers  
+  - `apply.sh`, `destroy.sh`, and `validate.sh` automate provisioning, teardown, and endpoint health verification  
+  - Validation checks confirm GKE readiness, Ingress provisioning, NFS mounts, Secret Manager access, and successful AD-backed authentication  
 
 - **Sample R Workloads:**  
-  - Example R scripts (Monte Carlo, bell curve, surface plotting, etc.) included to validate the environment  
+  - Example R scripts (Monte Carlo simulation, bell-curve plotting, 3D surface rendering, etc.) included for environment verification
+
 
 ## Users and Groups
 
