@@ -65,7 +65,7 @@ variable "user_base_dn" {
 variable "region" {
   description = "GCP region"
   type        = string
-  default     = "us-central1"               
+  default     = "us-central1"
 }
 
 # ====================================================================
@@ -75,7 +75,7 @@ variable "region" {
 variable "zone" {
   description = "GCP zone"
   type        = string
-  default     = "us-central1-a"              
+  default     = "us-central1-a"
 }
 
 # ====================================================================
@@ -86,5 +86,5 @@ variable "zone" {
 variable "gke_cluster_name" {
   description = "Name of the GKE cluster"
   type        = string
-  default     = "rstudio-gke"                  
+  default     = "rstudio-gke"
 }

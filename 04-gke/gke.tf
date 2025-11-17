@@ -169,7 +169,7 @@ resource "kubernetes_service_account" "rstudio_ksa" {
     namespace = "default"
 
     annotations = {
-      "iam.gke.io/gcp-service-account" =google_service_account.rstudio_gsa.email
+      "iam.gke.io/gcp-service-account" = google_service_account.rstudio_gsa.email
     }
   }
 }
@@ -208,5 +208,5 @@ resource "google_project_iam_member" "secret_access" {
   project = local.credentials.project_id
   role    = "roles/secretmanager.secretAccessor"
 
-  member  = "serviceAccount:${google_service_account.rstudio_gsa.email}"
+  member = "serviceAccount:${google_service_account.rstudio_gsa.email}"
 }
