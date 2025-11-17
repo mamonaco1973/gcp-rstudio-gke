@@ -84,7 +84,7 @@ TAG_EXISTS=$(
 )
 
 if [[ -n "$TAG_EXISTS" ]]; then
-    echo "NOTE: RStudio image/tag exists."
+    echo "NOTE: RStudio image/tag exists, skipping docker build."
 else
   cd rstudio
   docker build \
@@ -99,26 +99,13 @@ cd ..
 exit 0
 
 # ------------------------------------------------------------------------------------------
-# Phase 4: RStudio Cluster Deployment
-# - Provisions auto-scaling cluster of RStudio servers from Phase 3 image
+# Phase 4: GKE Cluster Deployment
 # ------------------------------------------------------------------------------------------
 
-rstudio_image=$(gcloud compute images list \
-  --filter="name~'^rstudio-image' AND family=rstudio-images" \
-  --sort-by="~creationTimestamp" \
-  --limit=1 \
-  --format="value(name)")
-
-if [[ -z "$rstudio_image" ]]; then
-  echo "ERROR: No latest image found for 'rstudio-image' in family 'rstudio-images'."
-  exit 1
-fi
-
-cd 04-cluster
+cd 04-gke
 
 terraform init
 terraform apply \
-  -var="rstudio_image_name=$rstudio_image" \
   -auto-approve
 
 cd .. # Return to project root
