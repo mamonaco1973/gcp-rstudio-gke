@@ -58,3 +58,33 @@ variable "user_base_dn" {
   default     = "CN=Users,DC=rstudio,DC=mikecloud,DC=com"
 }
 
+# ====================================================================
+# GCP REGION CONFIGURATION
+# Must match where you provision other GCP services like subnets and GKE
+# ====================================================================
+variable "region" {
+  description = "GCP region"
+  type        = string
+  default     = "us-central1"               
+}
+
+# ====================================================================
+# GCP ZONE CONFIGURATION
+# More specific than region — controls where GKE nodes live
+# ====================================================================
+variable "zone" {
+  description = "GCP zone"
+  type        = string
+  default     = "us-central1-a"              
+}
+
+# ====================================================================
+# GKE CLUSTER NAME
+# This shows up in the GCP Console and influences node names, URLs, etc.
+# Keep it short, lowercase, and unique in the region
+# ====================================================================
+variable "gke_cluster_name" {
+  description = "Name of the GKE cluster"
+  type        = string
+  default     = "rstudio-gke"                  
+}
