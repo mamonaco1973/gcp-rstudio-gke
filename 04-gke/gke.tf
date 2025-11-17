@@ -8,8 +8,8 @@ resource "google_container_cluster" "primary" {
   remove_default_node_pool = true            # Delete the useless default node pool (we'll define our own)
   initial_node_count       = 1               # Required placeholder value; has no effect when node pool is removed
 
-  network    = google_compute_network.gke_vpc.name        # Attach cluster to custom VPC
-  subnetwork = google_compute_subnetwork.gke_subnet.name  # Use custom subnet inside that VPC
+  network    = data.google_compute_network.gke_vpc.name        # Attach cluster to custom VPC
+  subnetwork = data.google_compute_subnetwork.ad_subnet.name   # Use custom subnet inside that VPC
 
   ip_allocation_policy {}                    # Enable VPC-native (alias IP) mode — a GKE best practice
 
@@ -20,7 +20,7 @@ resource "google_container_cluster" "primary" {
   }
 
   private_cluster_config {
-     enable_private_nodes    = true              # ⛔ No public IPs on nodes
+     enable_private_nodes    = true              
   }
 }
 
