@@ -134,6 +134,7 @@ gcloud container clusters get-credentials rstudio-gke \
   --project $project_id
 
 kubectl get nodes
+kubectl apply -f rstudio-app.yaml
 
 # ------------------------------------------------------------------------------------------
 # Phase 6: Validation
