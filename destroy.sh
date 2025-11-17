@@ -10,6 +10,8 @@
 
 set -e  # Exit immediately on any unhandled command failure
 
+kubectl delete -f rstudio-app.yaml || true
+
 cd 04-gke
 
 terraform init
