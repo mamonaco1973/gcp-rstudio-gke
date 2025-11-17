@@ -108,9 +108,22 @@ terraform apply \
 
 cd .. # Return to project root
 
+# ------------------------------------------------------------------------------------------
+# Phase 5: Configure kubectl and deploy YAML
+# ------------------------------------------------------------------------------------------
+
+# Enable GKE auth plugin compatibility for newer kubectl versions.
+export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
+# Fetch Kubernetes credentials from the newly created GKE cluster to configure kubectl.
+gcloud container clusters get-credentials rstudio-gke \
+  --zone us-central1-a \
+  --project $project_id
+
+kubectl get nodes
 
 # ------------------------------------------------------------------------------------------
-# Phase 5: Validation
+# Phase 6: Validation
 # - Runs post-deployment validation checks to confirm successful setup
 # ------------------------------------------------------------------------------------------
 ./validate.sh
