@@ -1,45 +1,54 @@
 #!/bin/bash
-# ==========================================================================================
-# Destroy Pipeline Script: Mini-AD + RStudio Cluster on GCP
-# ------------------------------------------------------------------------------------------
+# ==============================================================================
+# Destroy Pipeline Script: Mini-AD + RStudio on GCP (GKE version)
+# ------------------------------------------------------------------------------
 # Purpose:
-#   - Tears down deployed infrastructure in reverse order of build
-#   - Removes RStudio cluster, custom images, servers, and Active Directory
-#   - Ensures no residual GCP resources remain after cleanup
-# ==========================================================================================
+#   - Removes all deployed components in reverse build order
+#   - Deletes GKE workloads, servers, and Mini-AD resources
+#   - Ensures no leftover GCP resources remain after teardown
+# ==============================================================================
 
-set -e  # Exit immediately on any unhandled command failure
+set -e  # Exit immediately if any command returns a non-zero status
+
+# ------------------------------------------------------------------------------
+# Phase 1: Remove RStudio GKE Workloads
+# - Deletes Kubernetes deployments, services, and config
+# ------------------------------------------------------------------------------
 
 kubectl delete -f rstudio-app.yaml || true
+
+# ------------------------------------------------------------------------------
+# Phase 2: Destroy GKE Cluster
+# - Removes the Kubernetes cluster and supporting components
+# ------------------------------------------------------------------------------
 
 cd 04-gke
 
 terraform init
 terraform destroy -auto-approve
 
-cd .. # Return to project root
+cd ..  # Return to project root
 
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 3: Server Teardown
-# - Removes Windows and Linux client VMs connected to Active Directory
-# ------------------------------------------------------------------------------------------
+# - Destroys Windows and Linux hosts joined to Mini-AD
+# ------------------------------------------------------------------------------
 
 cd 02-servers
 
 terraform init
 terraform destroy -auto-approve
 
-cd .. # Return to project root
+cd ..  # Return to project root
 
-
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 4: Active Directory Teardown
-# - Destroys the Samba-based Active Directory resources
-# ------------------------------------------------------------------------------------------
+# - Removes the Samba-based Mini-AD infrastructure
+# ------------------------------------------------------------------------------
 
 cd 01-directory
 
 terraform init
 terraform destroy -auto-approve
 
-cd .. # Return to project root
+cd ..  # Return to project root

@@ -1,19 +1,19 @@
 #!/bin/bash
-# ==========================================================================================
-# Build Pipeline Script: Mini-AD + RStudio Cluster on GCP
-# ------------------------------------------------------------------------------------------
+# ==============================================================================
+# Build Pipeline Script: Mini-AD + RStudio Cluster on GCP (GKE version)
+# ------------------------------------------------------------------------------
 # Purpose:
-#   - Orchestrates multi-phase deployment using Terraform and Packer
-#   - Ensures environment validation before execution
-#   - Builds Active Directory, servers, custom RStudio image, and cluster
-# ==========================================================================================
+#   - Automates the full deployment of the GKE-based RStudio environment
+#   - Validates environment settings before proceeding
+#   - Deploys Active Directory, supporting servers, Docker image, and GKE cluster
+# ==============================================================================
 
-set -e  # Exit immediately on any unhandled command failure
+set -e  # Exit immediately if any command returns a non-zero status
 
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 0: Environment Check
-# - Runs a helper script to verify required environment variables, tools, and configs
-# ------------------------------------------------------------------------------------------
+# - Runs helper script to verify tools, vars, creds, and config files
+# ------------------------------------------------------------------------------
 
 ./check_env.sh
 if [ $? -ne 0 ]; then
@@ -21,62 +21,60 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 1: Active Directory Deployment
-# - Provisions Samba-based Active Directory using Terraform
-# ------------------------------------------------------------------------------------------
+# - Builds the Samba-based Mini-AD environment with Terraform
+# ------------------------------------------------------------------------------
+
 cd 01-directory
 
-terraform init                # Initialize Terraform providers and backend
-terraform apply -auto-approve # Apply configuration without manual approval
+terraform init                # Load providers and backend
+terraform apply -auto-approve # Deploy Mini-AD infra without prompts
 
 if [ $? -ne 0 ]; then
   echo "ERROR: Terraform apply failed in 01-directory. Exiting."
   exit 1
 fi
 
-cd .. # Return to project root
+cd ..  # Return to project root
 
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 2: Server Deployment
-# - Provisions Windows and Linux clients joined to Active Directory
-# ------------------------------------------------------------------------------------------
+# - Deploys Windows and Linux hosts joined to Mini-AD
+# ------------------------------------------------------------------------------
 
 cd 02-servers
 
-terraform init                # Initialize Terraform for server provisioning
-terraform apply -auto-approve # Deploy server infrastructure
+terraform init                # Initialize server Terraform stack
+terraform apply -auto-approve # Create server instances
 
-cd .. # Return to project root
+cd ..  # Return to project root
 
-
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 3: RStudio Docker Image Build
-# - Builds a custom Docker image with RStudio
-# ------------------------------------------------------------------------------------------
+# - Builds and pushes the RStudio image used by GKE workloads
+# ------------------------------------------------------------------------------
 
 secretValue=$(gcloud secrets versions access latest --secret="rstudio-credentials")
-RSTUDIO_PASSWORD=$(echo $secretValue | jq -r '.password')      # Extract password
+RSTUDIO_PASSWORD=$(echo "$secretValue" | jq -r '.password')
 
 if [ -z "$RSTUDIO_PASSWORD" ] || [ "$RSTUDIO_PASSWORD" = "null" ]; then
   echo "ERROR: Failed to retrieve RStudio password."
   exit 1
 fi
 
-
-# Move into the Docker setup directory where all container builds occur.
 cd "03-docker"
-echo "NOTE: Building rstudio container with Docker."
+echo "NOTE: Building RStudio container for GKE deployment."
 
-# Authenticate Docker with Google Artifact Registry for the specified region.
-gcloud auth configure-docker us-central1-docker.pkg.dev -q 
+# Authenticate Docker to Google Artifact Registry
+gcloud auth configure-docker us-central1-docker.pkg.dev -q
 
-# Extract the GCP project ID from the credentials JSON file.
+# Read project ID from local credentials file
 project_id=$(jq -r '.project_id' "../credentials.json")
 
 GCR_IMAGE=us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio:rc1
 
+# Check for existing image tag to avoid rebuilding
 TAG_EXISTS=$(
   gcloud artifacts docker tags list \
     us-central1-docker.pkg.dev/$project_id/rstudio-repository/rstudio \
@@ -84,60 +82,66 @@ TAG_EXISTS=$(
 )
 
 if [[ -n "$TAG_EXISTS" ]]; then
-    echo "NOTE: RStudio image/tag exists, skipping docker build."
+  echo "NOTE: Image tag exists. Skipping Docker build."
 else
   cd rstudio
   docker build \
-       --build-arg RSTUDIO_PASSWORD="${RSTUDIO_PASSWORD}" \
-       -t $GCR_IMAGE . 
-  docker push $GCR_IMAGE
+    --build-arg RSTUDIO_PASSWORD="${RSTUDIO_PASSWORD}" \
+    -t "$GCR_IMAGE" .
+  docker push "$GCR_IMAGE"
   cd ..
 fi
 
 cd ..
 
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 4: GKE Cluster Deployment
-# ------------------------------------------------------------------------------------------
+# - Deploys the Kubernetes cluster hosting RStudio
+# ------------------------------------------------------------------------------
 
 cd 04-gke
 
 terraform init
-terraform apply \
-  -auto-approve
+terraform apply -auto-approve
 
 export rstudio_image="${GCR_IMAGE}"
 export project_id="${project_id}"
-export filestore_ip=$(gcloud filestore instances describe nfs-server \
-  --zone=us-central1-b \
-  --project=${project_id} \
-  --format="value(networks[0].ipAddresses[0])")
+
+# Retrieve Filestore NFS endpoint for RStudio home dirs
+export filestore_ip=$(
+  gcloud filestore instances describe nfs-server \
+    --zone=us-central1-b \
+    --project="${project_id}" \
+    --format="value(networks[0].ipAddresses[0])"
+)
+
 export filestore_share="filestore"
 
+# Render Kubernetes deployment YAML from template
 envsubst < yaml/rstudio-app.yaml.tmpl > ../rstudio-app.yaml || {
-    echo "ERROR: Failed to generate Kubernetes deployment file. Exiting."
-    exit 1
+  echo "ERROR: Failed to generate k8s manifest. Exiting."
+  exit 1
 }
 
-cd .. # Return to project root
+cd ..  # Return to project root
 
-# ------------------------------------------------------------------------------------------
-# Phase 5: Configure kubectl and deploy YAML
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
+# Phase 5: Configure kubectl and Deploy YAML
+# - Fetches GKE credentials and deploys the RStudio workloads
+# ------------------------------------------------------------------------------
 
-# Enable GKE auth plugin compatibility for newer kubectl versions.
 export USE_GKE_GCLOUD_AUTH_PLUGIN=True
 
-# Fetch Kubernetes credentials from the newly created GKE cluster to configure kubectl.
 gcloud container clusters get-credentials rstudio-gke \
   --zone us-central1-a \
-  --project $project_id
+  --project "$project_id"
 
-kubectl get nodes
-kubectl apply -f rstudio-app.yaml
+kubectl get nodes               # Confirm GKE nodes are available
+kubectl apply -f rstudio-app.yaml  # Deploy RStudio to GKE
 
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Phase 6: Validation
-# - Runs post-deployment validation checks to confirm successful setup
-# ------------------------------------------------------------------------------------------
+# - Runs post-deployment checks for GKE environment readiness
+# ------------------------------------------------------------------------------
+
 ./validate.sh

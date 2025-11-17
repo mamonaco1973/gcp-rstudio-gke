@@ -1,51 +1,48 @@
 #!/bin/bash
-# ==========================================================================================
-# Validation Script: Retrieve Public IPs and Verify Load Balancer
-# ------------------------------------------------------------------------------------------
+# ==============================================================================
+# Validation Script: GKE RStudio Deployment Health Check
+# ------------------------------------------------------------------------------
 # Purpose:
-#   - Fetches public IPs for key resources (NFS gateway, Windows AD instance,
-#     RStudio load balancer)
-#   - Validates that the load balancer is active and serving requests
-#   - Provides user-friendly status messages for troubleshooting
-# ==========================================================================================
+#   - Retrieves public IPs for helper VMs and GKE ingress service
+#   - Waits for the RStudio ingress IP to be assigned by GKE
+#   - Verifies that the RStudio endpoint returns an HTTP 200 response
+# ==============================================================================
 
-
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Step 1: Retrieve NFS Gateway Public IP
-# - Queries Compute Engine for instances with name starting "nfs-gateway"
-# - Extracts the NAT public IP assigned to the VM
-# ------------------------------------------------------------------------------------------
+# - Queries Compute Engine for VMs named like "nfs-gateway"
+# - Extracts their external NAT IP address
+# ------------------------------------------------------------------------------
 
 NFS_IP=$(gcloud compute instances list \
   --filter="name~'^nfs-gateway'" \
   --format="value(networkInterfaces.accessConfigs[0].natIP)")
 
-echo "NOTE: Linux nfs-gateway public IP address is $NFS_IP"
+echo "NOTE: Linux nfs-gateway public IP address: $NFS_IP"
 
-
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Step 2: Retrieve Windows AD Instance Public IP
-# - Queries for instance name starting with "win-ad"
-# - Extracts the NAT public IP assigned to the VM
-# ------------------------------------------------------------------------------------------
+# - Queries Compute Engine for VMs named like "win-ad"
+# - Extracts the external NAT IP used for admin or debugging
+# ------------------------------------------------------------------------------
 
 WIN_IP=$(gcloud compute instances list \
   --filter="name~'^win-ad'" \
   --format="value(networkInterfaces.accessConfigs[0].natIP)")
 
-echo "NOTE: Windows instance public IP address is $WIN_IP"
+echo "NOTE: Windows AD instance public IP address: $WIN_IP"
 
+# ------------------------------------------------------------------------------
+# Step 3: Wait for GKE Ingress External IP
+# - Monitors the GKE ingress object "rstudio-ingress"
+# - Waits until the Kubernetes LB controller assigns an IP
+# ------------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------------------
-# Step 3: Wait for External IP from Kubernetes Ingress (rstudio-ingress)
-# - Gets the static global IP reserved for the RStudio load balancer
-# ------------------------------------------------------------------------------------------
-
-MAX_WAIT=300         # Total wait time in seconds (5 minutes)
-SLEEP_INTERVAL=5     # Seconds between checks
+MAX_WAIT=300        # Max wait time (seconds)
+SLEEP_INTERVAL=5    # Interval between checks
 ELAPSED=0
 
-echo "NOTE: Waiting for Ingress 'rstudio-ingress' external IP..."
+echo "NOTE: Waiting for GKE ingress 'rstudio-ingress' external IP..."
 
 while true; do
   RSTUDIO_LB_IP=$(
@@ -54,37 +51,36 @@ while true; do
   )
 
   if [[ -n "$RSTUDIO_LB_IP" ]]; then
-    echo "NOTE: External IP assigned: $RSTUDIO_LB_IP"
+    echo "NOTE: Ingress external IP assigned: $RSTUDIO_LB_IP"
     break
   fi
 
   if (( ELAPSED >= MAX_WAIT )); then
-    echo "ERROR: Timed out waiting for Ingress external IP." >&2
+    echo "ERROR: Timed out waiting for ingress external IP." >&2
     exit 1
   fi
 
-  echo "NOTE: Ingress IP not yet assigned. Waiting..."
+  echo "NOTE: Ingress IP not available. Retrying..."
   sleep "$SLEEP_INTERVAL"
   (( ELAPSED += SLEEP_INTERVAL ))
 done
 
-
-# ------------------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Step 4: Validate Load Balancer Availability
-# - Continuously poll the /auth-sign-in endpoint on the LB
-# - Exit once HTTP 200 is returned, otherwise wait and retry
-# ------------------------------------------------------------------------------------------
+# - Polls the RStudio sign-in endpoint via ingress IP
+# - Continues until HTTP 200 is returned
+# ------------------------------------------------------------------------------
 
 URL="http://$RSTUDIO_LB_IP/auth-sign-in"
 
 while true; do
   HTTP_CODE=$(curl -o /dev/null -s -w "%{http_code}" "$URL")
-  
+
   if [ "$HTTP_CODE" -eq 200 ]; then
-     echo "NOTE: Load balancer is active. Access RStudio at http://$RSTUDIO_LB_IP"
-     exit 0
-  else
-    echo "WARNING: Waiting for the load balancer to become active."
-    sleep 60
+    echo "NOTE: RStudio service is active at: http://$RSTUDIO_LB_IP"
+    exit 0
   fi
+
+  echo "WARNING: Waiting for the RStudio endpoint to become active..."
+  sleep 60
 done
