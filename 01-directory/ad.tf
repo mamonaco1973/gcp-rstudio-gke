@@ -10,7 +10,7 @@
 module "mini_ad" {
   source            = "github.com/mamonaco1973/module-gcp-mini-ad" # Path to the mini-ad Terraform module
   netbios           = var.netbios                                  # NetBIOS domain name (e.g., MCLOUD)
-  network           = google_compute_network.ad_vpc.id             # VPC where the AD will reside
+  network           = google_compute_network.gke_vpc.id            # VPC where the AD will reside
   realm             = var.realm                                    # Kerberos realm (usually UPPERCASE DNS domain)
   users_json        = local.users_json                             # JSON blob of users and passwords (built below)
   user_base_dn      = var.user_base_dn                             # Base DN for user accounts in LDAP

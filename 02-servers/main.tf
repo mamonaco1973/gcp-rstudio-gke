@@ -33,11 +33,11 @@ locals {
 # Looks up existing VPC network and subnet for resource attachment.
 #
 # Key Points:
-#   - `ad-vpc` is the base VPC for Active Directory lab resources.
+#   - `gke-vpc` is the base VPC for Active Directory lab resources.
 #   - `ad-subnet` defines the subnet within `us-central1`.
 # ================================================================================================
-data "google_compute_network" "ad_vpc" {
-  name = "ad-vpc"
+data "google_compute_network" "gke_vpc" {
+  name = "gke-vpc"
 }
 
 data "google_compute_subnetwork" "ad_subnet" {

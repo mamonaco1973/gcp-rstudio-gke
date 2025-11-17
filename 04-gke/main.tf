@@ -32,7 +32,7 @@ locals {
 #   - Looks up existing VPC and subnet by name
 #   - Ensures new resources integrate with predefined networking
 # ==========================================================================================
-data "google_compute_network" "ad_vpc" {
+data "google_compute_network" "gke_vpc" {
   name = var.vpc_name
 }
 

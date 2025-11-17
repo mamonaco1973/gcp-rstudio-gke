@@ -49,7 +49,7 @@ resource "google_filestore_instance" "nfs_server" {
   # - Attaches Filestore to the specified VPC network.
   # - Modes set to IPv4 only (default for most labs).
   networks {
-    network = data.google_compute_network.ad_vpc.name
+    network = data.google_compute_network.gke_vpc.name
     modes   = ["MODE_IPV4"]
   }
 }
@@ -66,7 +66,7 @@ resource "google_filestore_instance" "nfs_server" {
 # ================================================================================================
 resource "google_compute_firewall" "allow_nfs" {
   name    = "allow-nfs"
-  network = data.google_compute_network.ad_vpc.name
+  network = data.google_compute_network.gke_vpc.name
 
   allow {
     protocol = "tcp"

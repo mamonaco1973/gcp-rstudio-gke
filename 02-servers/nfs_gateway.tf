@@ -38,7 +38,7 @@ resource "random_string" "vm_suffix" {
 # ================================================================================================
 resource "google_compute_firewall" "allow_ssh" {
   name    = "allow-ssh"
-  network = "ad-vpc"
+  network = "gke-vpc"
 
   allow {
     protocol = "tcp"
@@ -63,7 +63,7 @@ resource "google_compute_firewall" "allow_ssh" {
 # ================================================================================================
 resource "google_compute_firewall" "allow_smb" {
   name    = "allow-smb"
-  network = "ad-vpc"
+  network = "gke-vpc"
 
   allow {
     protocol = "tcp"
@@ -82,7 +82,7 @@ resource "google_compute_firewall" "allow_smb" {
 # Ubuntu VM: NFS Gateway + AD Join Client
 # ================================================================================================
 # Deploys an Ubuntu 24.04 VM that:
-#   - Connects to the "ad-vpc" network and "ad-subnet".
+#   - Connects to the "gke-vpc" network and "ad-subnet".
 #   - Runs a startup script to join the AD domain and mount NFS from Filestore.
 #   - Uses OS Login for secure SSH access.
 #
@@ -109,7 +109,7 @@ resource "google_compute_instance" "nfs_gateway_instance" {
   # Network Interface
   # ----------------------------------------------------------------------------------------------
   network_interface {
-    network    = "ad-vpc"
+    network    = "gke-vpc"
     subnetwork = "ad-subnet"
 
     # Ephemeral public IP (required for SSH access)

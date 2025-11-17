@@ -24,8 +24,8 @@
 #   - Auto subnet creation disabled.
 #   - All subnets must be manually defined.
 # ================================================================================================
-resource "google_compute_network" "ad_vpc" {
-  name                    = "ad-vpc"
+resource "google_compute_network" "gke_vpc" {
+  name                    = "gke-vpc"
   auto_create_subnetworks = false
 }
 
@@ -33,7 +33,7 @@ resource "google_compute_network" "ad_vpc" {
 # ================================================================================================
 # Subnet: Active Directory Subnet
 # ================================================================================================
-# Defines a subnet inside the `ad-vpc` network for AD resources.
+# Defines a subnet inside the `gke-vpc` network for AD resources.
 #
 # Key Points:
 #   - Located in `us-central1` region.
@@ -43,7 +43,7 @@ resource "google_compute_network" "ad_vpc" {
 resource "google_compute_subnetwork" "ad_subnet" {
   name          = "ad-subnet"
   region        = "us-central1"
-  network       = google_compute_network.ad_vpc.id
+  network       = google_compute_network.gke_vpc.id
   ip_cidr_range = "10.1.0.0/24"
 }
 
@@ -59,7 +59,7 @@ resource "google_compute_subnetwork" "ad_subnet" {
 # ================================================================================================
 resource "google_compute_router" "ad_router" {
   name    = "ad-router"
-  network = google_compute_network.ad_vpc.id
+  network = google_compute_network.gke_vpc.id
   region  = "us-central1"
 }
 

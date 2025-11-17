@@ -56,7 +56,7 @@ resource "google_secret_manager_secret_version" "admin_secret_version" {
 # ================================================================================================
 resource "google_compute_firewall" "allow_rdp" {
   name    = "allow-rdp"
-  network = "ad-vpc"
+  network = "gke-vpc"
 
   # Allow TCP traffic on port 3389 (RDP)
   allow {
@@ -101,7 +101,7 @@ resource "google_compute_instance" "windows_ad_instance" {
   # Network Interface
   # ----------------------------------------------------------------------------------------------
   network_interface {
-    network    = "ad-vpc"
+    network    = "gke-vpc"
     subnetwork = "ad-subnet"
 
     # Assigns a public IP so RDP connections can reach the VM
