@@ -112,6 +112,11 @@ When the deployment completes, the following resources are created:
   - Example R scripts (Monte Carlo simulation, bell-curve plotting, 3D surface rendering, etc.) included for environment verification
 
 
+### Kubernetes Components
+
+![k8s diagram](yaml-diagram.png)
+
+
 ## Users and Groups
 
 The domain controller provisions **sample users and groups** via Terraform templates. These are intended for testing and demonstration.  
