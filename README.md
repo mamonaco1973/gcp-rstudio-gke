@@ -1,223 +1,157 @@
-# GCP RStudio Cluster on GKE with Active Directory and NFS Integration
+# RStudio Server on GKE: Kubernetes, Filestore and Active Directory
 
-This project builds on both the **GCP Mini Active Directory** and **RStudio VM Cluster** lab components to deliver a **cloud-native, domain-joined RStudio Server environment** running on **Google Kubernetes Engine (GKE)**.
+An **RStudio Server** cluster that runs as pods on **Google Kubernetes
+Engine**, built on the [GCP Mini Active Directory](https://github.com/mamonaco1973/gcp-mini-ad)
+lab and the VM-based
+[gcp-rstudio-cluster](https://github.com/mamonaco1973/gcp-rstudio-cluster).
+An **NGINX ingress controller** spreads users across RStudio pods; each pod
+reads the AD join password from **Secret Manager** through Workload
+Identity, joins a **mini-AD** domain when it starts, and mounts a
+**Filestore** share for home directories and a shared R package library. A
+Windows VM and a Samba gateway give admins access to the same files.
 
-![RStudio](rstudio.png)
+![RStudio Server](rstudio.png)
 
-It uses **Terraform**, **Docker**, **Helm**, and **Kubernetes manifests** to create a fully automated analytics platform that integrates with:
+| Piece | Where | Role |
+|---|---|---|
+| **rstudio-gke** | GKE, zonal, `us-central1-a` | private nodes behind Cloud NAT; Workload Identity pool `<project>.svc.id.goog`; `default-node-pool` of `e2-standard-4`, 1 to 4 nodes with autoscaling |
+| **NGINX ingress** | Helm, `ingress-nginx` | external network load balancer; HTTP 80; cookie session affinity (`rstudio_session`) |
+| **rstudio** | StatefulSet | 2 replicas (HPA 2 to 4); requests 0.5 CPU and 500 MiB, limits 2 CPU and 3000 MiB; service account `rstudio-sa`; probes on `/auth-sign-in` |
+| **rstudio-rw** | Google service account | `rstudio-sa` impersonates it through `roles/iam.workloadIdentityUser`; it has `roles/secretmanager.secretAccessor` |
+| **rstudio-repository** | Artifact Registry, `us-central1` | the RStudio image |
+| **nfs-server** | Filestore, `us-central1-a` | BASIC_HDD, 1 TB, NFSv3; a persistent volume mounts it at `/nfs` and its `home` directory at `/home` |
+| **nfs-gateway-&lt;suffix&gt;** | `us-central1-a` | Ubuntu 24.04; joined to AD; mounts the share and serves `/nfs` over Samba |
+| **win-ad-&lt;suffix&gt;** | `us-central1-a` | Windows Server 2022; joined to AD; RSAT; maps the gateway's share as `Z:` |
+| **mini-AD** | `ad-subnet` in `gke-vpc` | [`module-gcp-mini-ad`](https://github.com/mamonaco1973/module-gcp-mini-ad) Samba DC for `rstudio.mikecloud.com` (`RSTUDIO`) |
+| **Secret Manager** | project | `admin-ad-credentials` and one `*-ad-credentials` secret per user |
 
-- **Active Directory authentication** (via a Samba-based Mini-AD Domain Controller running on GCE)  
-- **NFS-backed persistent storage** (via a Linux NFS gateway VM exporting `/nfs/home`, `/nfs/data`, `/nfs/rlibs`)  
-- **GKE Workload Identity** for secure, secretless pod-level access to Google APIs such as Secret Manager  
-- **Google Artifact Registry (GAR)** for hosting the custom RStudio Server container image  
-- A **template-driven Kubernetes manifest (`rstudio-app.yaml`)** rendered by Terraform and applied via `kubectl` to deploy the RStudio StatefulSet, PersistentVolume, PersistentVolumeClaim, Service, and Ingress
+## Architecture
 
-Unlike VM-based scaling groups, this solution deploys **containerized RStudio Server pods** on GKE that join the domain at runtime and mount **NFS volumes** for user home directories, project data, and shared R package storage.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="architecture-dark.svg">
+  <img alt="RStudio users reach the NGINX ingress controller's external load balancer over HTTP port 80, with cookie session affinity, in the rstudio-gke GKE cluster, a zonal cluster with private nodes. It forwards to port 8787 on the pods of the rstudio StatefulSet, two to four RStudio containers from the Artifact Registry image on the default node pool (e2-standard-4, one to four nodes). Each pod uses Workload Identity, as the rstudio-sa Kubernetes service account bound to the rstudio-rw Google service account, to read the AD join password from Secret Manager, joins the mini-AD Samba domain controller with SSSD when it starts, and mounts the Filestore share at /nfs and /home, including the shared R library /nfs/rlibs. Administrators RDP to the Windows admin VM, which maps the NFS gateway's SMB share as drive Z:; the gateway mounts the same share and is also joined to the domain." src="architecture-light.svg">
+</picture>
 
-Key capabilities demonstrated:
+Regenerate with `python3 make_diagram.py`. The gateway and Windows VM also
+join the domain; those lines are left off the diagram to keep it readable.
 
-1. **GKE-Hosted RStudio Server** – RStudio Server (Open Source Edition) runs as containers on Google Kubernetes Engine for elasticity, rapid scaling, and resilient self-healing.  
-2. **Active Directory Authentication** – Pods authenticate against a Samba-based Active Directory domain, providing consistent identity control across users and sessions.  
-3. **NFS Persistent Storage** – User home folders and shared R library paths are mounted from an NFS gateway VM, ensuring cross-pod consistency and reproducible analytics environments.  
-4. **NGINX Ingress with Global Static IP** – Provides external access, session affinity, simplified routing, and integration with the GCP external HTTP(S) load balancing stack.  
-5. **End-to-End Infrastructure as Code** – Terraform builds the Mini-AD, networking, firewall rules, NFS gateway, Artifact Registry, GKE cluster, Workload Identity bindings, and NGINX ingress; Docker builds the RStudio image; the **Terraform-rendered `rstudio-app.yaml` manifest is applied with `kubectl`** to deploy the complete RStudio workload.
+- **`01-directory/`**: the VPC, subnet and Cloud NAT, the Artifact Registry
+  repository, the passwords in Secret Manager, and the mini-AD DC with users
+  and groups from `scripts/users.json.template`.
+- **`02-servers/`**: Filestore, the gateway and Windows VMs, and their
+  firewall rules.
+- **`03-docker/rstudio/`**: the RStudio image (`Dockerfile`, install scripts
+  and `startup.sh`).
+- **`04-gke/`**: the cluster and node pool, the Workload Identity service
+  accounts and binding, the NGINX Helm release, and
+  `yaml/rstudio-app.yaml.tmpl` (storage, secret, StatefulSet, services,
+  ingress and HPA).
+- **`05-rsamples/`**: sample R scripts and `packages.R`.
+- **`06-utils/`**: `getNextUID` / `getNextGID` scripts for adding AD users.
 
-Together, these components form a scalable, domain-aware analytics platform where RStudio users share packages, data, and authentication seamlessly across a fully managed Google Kubernetes environment.
+## How a pod starts
 
-![diagram](gcp-rstudio-gke.png)
+The image's `startup.sh` starts D-Bus, reads the AD admin password with
+`gcloud secrets versions access` as the pod's Workload Identity, joins the
+domain with `realm join` (SSSD with short names and the POSIX IDs from AD),
+gives `linux-admins` passwordless sudo, writes `Rprofile.site` so the
+library path is the user's own library, then `/nfs/rlibs`, then the system
+library, and runs RStudio Server in the foreground. `/nfs/rlibs` belongs to
+`rstudio-admins`.
+
+## Users and groups
+
+| User | uidNumber | Groups | Notes |
+|---|---|---|---|
+| jsmith | 10001 | rstudio-users, us, linux-admins, rstudio-admins, Domain Admins | sudo; writes `/nfs/rlibs` |
+| edavis | 10002 | rstudio-users, us | |
+| rpatel | 10003 | rstudio-users, india, linux-admins, rstudio-admins, Domain Admins | sudo; writes `/nfs/rlibs` |
+| akumar | 10004 | rstudio-users, india | |
+
+| Group | gidNumber |
+|---|---|
+| rstudio-users | 10001 (every user's primary group) |
+| us | 10002 |
+| india | 10003 |
+| linux-admins | 10004 |
+| rstudio-admins | 10005 |
 
 ## Prerequisites
 
 * [A Google Cloud Account](https://console.cloud.google.com/)
-* [Install gcloud CLI](https://cloud.google.com/sdk/docs/install) 
+* [Install gcloud CLI](https://cloud.google.com/sdk/docs/install)
 * [Install Terraform](https://developer.hashicorp.com/terraform/install)
-* [Install kubectl](https://kubernetes.io/docs/tasks/tools/)
 * [Install Docker](https://docs.docker.com/engine/install/)
+* [Install kubectl](https://kubernetes.io/docs/tasks/tools/) and
+  [jq](https://jqlang.github.io/jq/download/)
 
-If this is your first time watching our content, we recommend starting with this video: [GCP + Terraform: Easy Setup](https://youtu.be/3spJpYX4f7I). It provides a step-by-step guide to properly configure Terraform, Packer, and the gcloud CLI.
+Put a service account key in the repository root as `credentials.json`. If
+this is your first time watching our content, we recommend starting with
+this video: [GCP + Terraform: Easy Setup](https://youtu.be/3spJpYX4f7I).
 
-## Download this Repository  
-
-Clone the repository from GitHub and move into the project directory:  
+## Deploy
 
 ```bash
 git clone https://github.com/mamonaco1973/gcp-rstudio-gke.git
 cd gcp-rstudio-gke
-```  
+./apply.sh
+```
 
+`check_env.sh` signs in with `credentials.json` and runs `api_setup.sh` to
+enable the APIs. `apply.sh` applies `01-directory` and `02-servers`, builds
+the RStudio image and pushes it to Artifact Registry, applies `04-gke`, then
+renders and applies `rstudio-app.yaml`. It ends by running `validate.sh`:
 
-## Build the Code  
+```
+NOTE: Linux nfs-gateway public IP address: 34.x.x.x
+NOTE: Windows AD instance public IP address: 34.x.x.x
+NOTE: Waiting for GKE ingress 'rstudio-ingress' external IP...
+NOTE: Ingress external IP assigned: 34.x.x.x
+NOTE: RStudio service is active at: http://34.x.x.x
+```
 
-Run [check_env](check_env.sh) to validate your environment, then run [apply](apply.sh) to provision the infrastructure.  
+## Try it
 
-```bash
-develop-vm:~/gcp-rstudio-gke$ ./apply.sh
-NOTE: Validating that required commands are in PATH.
-NOTE: gcloud is found in the current PATH.
-NOTE: terraform is found in the current PATH.
-NOTE: All required commands are available.
-NOTE: Checking Google Cloud CLI connection.
-NOTE: Successfully authenticated with GCP.
-Initializing provider plugins...
-Terraform has been successfully initialized!
-```  
-### Build Results
+1. Open the RStudio URL and sign in as one of the users above, with the
+   password from its `*-ad-credentials` secret.
+2. Add a user:
+   1. RDP to the **Windows RDP Host** as `jsmith` or `rpatel` and open
+      **Active Directory Users and Computers** with **View > Advanced
+      Features** on.
+   2. Under the domain's **Users** container, create the user with a UPN
+      such as `mcloud@rstudio.mikecloud.com` and an initial password.
 
-When the deployment completes, the following resources are created:
+      ![New user in Active Directory Users and Computers](windows.png)
 
-- **Networking:**  
-  - A custom VPC with segmented subnets for Active Directory, GKE nodes, the NFS gateway VM, and the application tier  
-  - Cloud NAT providing controlled outbound internet access for private GKE nodes  
-  - Firewall rules allowing SSH, HTTP/HTTPS ingress, NFS (2049/TCP), Kerberos/LDAP, and AD domain join traffic  
-  - DNS resolution handled by the Mini Active Directory domain controller and GCP Cloud DNS as needed  
+   3. Run `Z:\gcp-rstudio-cluster\06-utils\getNextUID.bat` for the next
+      free `uidNumber`.
+   4. In **Attribute Editor**, set `uidNumber` to that value, `gidNumber` to
+      `10001`, and `uid` to the login name.
+   5. Under **Member Of**, add `rstudio-users` and any other groups.
+   6. SSH to the **NFS Gateway Host** and check the mapping with
+      `id mcloud`:
 
-- **Identity, Security & Secret Manager:**  
-  - Google Secret Manager storing AD administrator credentials, RStudio service account secrets, and deployment parameters  
-  - GKE **Workload Identity** enabling pods to securely access Secret Manager and Google APIs without Kubernetes secrets  
-  - IAM bindings granting RStudio pods least-privilege access to GAR, Secret Manager, and logging APIs  
-  - Firewall boundaries and IAM scoping enforce secure, segmented communication throughout the environment  
+      ![id output on the Linux gateway](linux.png)
 
-- **Active Directory Domain:**  
-  - A Samba-based “Mini-AD” domain controller deployed on a Google Compute Engine VM  
-  - Provides Kerberos, LDAP, and DNS services for the cluster  
-  - Fully integrated with RStudio pods so users authenticate via domain credentials at login  
+   7. Sign in to RStudio as the new user. They can't write `/nfs/rlibs`
+      until they're in `rstudio-admins`.
 
-- **NFS Persistent Storage:**  
-  - A dedicated Linux NFS gateway VM exporting persistent directories including:  
-    - User home directories (`/nfs/home`)  
-    - Shared data paths (`/nfs/data`)  
-    - Shared R library directories (`/nfs/rlibs`)  
-  - Firewall rules enforce secure NFS mount traffic between GKE nodes and the gateway VM  
-  - Ensures consistent user environments across all RStudio pods  
-
-- **GKE Cluster & Node Pool:**  
-  - A Google Kubernetes Engine (GKE) cluster deployed via Terraform  
-  - Node pools sized and labeled for RStudio compute workloads  
-  - Workload Identity enabled for secure Artifact Registry pulls and Secret Manager access  
-  - Autoscaling support ensures efficient, cost-optimized scheduling of RStudio sessions  
-
-- **RStudio Application:**  
-  - RStudio Server (Open Source Edition) deployed as a Kubernetes StatefulSet and Service  
-  - NGINX Ingress Controller provides the external entrypoint, backed by a reserved Global Static IP  
-  - Ingress routing (including `/auth-sign-in`) ensures proper health checks and session management  
-  - Pods domain-join at startup and mount **NFS directories** for home folders, shared R packages, and project storage  
-  - Provides high availability, reproducibility, and secure multi-user access tied to Active Directory  
-
-- **Automation & Validation:**  
-  - Terraform modules orchestrate dependency ordering across networking, directory services, NFS, GKE, and application layers  
-  - `apply.sh`, `destroy.sh`, and `validate.sh` automate provisioning, teardown, and endpoint health verification  
-  - Validation checks confirm GKE readiness, Ingress provisioning, NFS mounts, Secret Manager access, and successful AD-backed authentication  
-
-- **Sample R Workloads:**  
-  - Example R scripts (Monte Carlo simulation, bell-curve plotting, 3D surface rendering, etc.) included for environment verification
-
-
-### Kubernetes Components
-
-![k8s diagram](yaml-diagram.png)
-
-
-## Users and Groups
-
-The domain controller provisions **sample users and groups** via Terraform templates. These are intended for testing and demonstration.  
-
-### Groups Created  
-
-| Group Name    | Category  | Scope     | gidNumber |
-|---------------|-----------|----------|-----------|
-| rstudio-users  | Security  | Universal | 10001 |
-| india         | Security  | Universal | 10002 |
-| us            | Security  | Universal | 10003 |
-| linux-admins  | Security  | Universal | 10004 |
-| rstudio-admins  | Security  | Universal | 10005 |
-
-### Users Created  
-
-| Username | Full Name   | uidNumber | gidNumber | Groups Joined                    |
-|----------|-------------|-----------|-----------|----------------------------------|
-| jsmith   | John Smith  | 10001     | 10001     | rstudio-users, us, linux-admins, rstudio-admins  |
-| edavis   | Emily Davis | 10002     | 10001     | rstudio-users, us                 |
-| rpatel   | Raj Patel   | 10003     | 10001     | rstudio-users, india, linux-admins, rstudio-admins|
-| akumar   | Amit Kumar  | 10004     | 10001     | rstudio-users, india              |
-
-
-### Understanding `uidNumber` and `gidNumber` for Linux Integration
-
-The **`uidNumber`** (User ID) and **`gidNumber`** (Group ID) attributes are critical when integrating **Active Directory** with **Linux systems**, particularly in environments where **SSSD** ([System Security Services Daemon](https://sssd.io/)) or similar services are used for identity management. These attributes allow Linux hosts to recognize and map Active Directory users and groups into the **POSIX** (Portable Operating System Interface) user and group model.
-
-### Creating a New RStudio User
-
-Follow these steps to provision a new user in the Active Directory domain and validate their access to the RStudio cluster:
-
-1. **Connect to the Domain Controller**  
-   - Log into the **`win-ad-xxxx`** server via a **RDP** client
-   - Use the `rpatel` or `jsmith` credentials that were provisioned during cluster deployment.  
-
-2. **Launch Active Directory Users and Computers (ADUC)**  
-   - From the Windows Start menu, open **“Active Directory Users and Computers.”**  
-   - Enable **Advanced Features** under the **View** menu. This ensures you can access the extended attribute tabs (e.g., UID/GID mappings).  
-
-3. **Navigate to the Users Organizational Unit (OU)**  
-   - In the left-hand tree, expand the domain (e.g., `rstudio.mikecloud.com`).  
-   - Select the **Users** OU where all cluster accounts are managed.  
-
-4. **Create a New User Object**  
-   - Right-click the Users OU and choose **New → User.**  
-   - Provide the following:  
-     - **Full Name:** Descriptive user name (e.g., “Mike Cloud”).  
-     - **User Logon Name (User Principal Name / UPN):** e.g., `mcloud@rstudio.mikecloud.com`.  
-     - **Initial Password:** Set an initial password.
-
-![Windows](windows.png)
-
-5. **Assign a Unique UID Number**  
-   - Open **PowerShell** on the AD server.  
-   - Run the script located at:  
-     ```powershell
-     Z:\nfs\gcp-rstudio-cluster\06-utils\getNextUID.bat
-     ```  
-   - This script returns the next available **`uidNumber`** to assign to the new account.  
-
-6. **Configure Advanced Attributes**  
-   - In the new user’s **Properties** dialog, open the **Attribute Editor** tab.  
-   - Set the following values:  
-     - `gidNumber` → **10001** (the shared GID for the `rstudio-users` group).  
-     - `uid` → match the user’s AD login ID (e.g., `rpatel`).  
-     - `uidNumber` → the unique numeric value returned from `getNextUID.ps1`.  
-
-7. **Add Group Memberships**  
-   - Go to the **Member Of** tab.  
-   - Add the user to the following groups:  
-     - **rstudio-users** → grants standard RStudio access.  
-     - **us** (or other geographic/departmental group as applicable).  
-
-8. **Validate User on Linux**  
-   - Open an **SSH** session to the **`nfs-gateway-xxxx`** instance.  
-   - Run the following command to confirm the user’s identity mapping:  
-     ```bash
-     id mcloud
-     ```  
-   - Verify that the output shows the correct **UID**, **GID**, and group memberships (e.g., `rstudio-users`).  
-
-![Linux](linux.png)
-
-9. **Validate RStudio Access**  
-   - Open the RStudio cluster’s Application Gateway's URL in a browser (e.g., `http://34.173.20.15/`).  
-   - Log in with the new AD credentials.  
-
-10. **Verify Permissions**  
-   - By default, the new user is **not** a member of the `rstudio-admin` group.  
-   - Attempting to install packages into the **shared library path `/nfs/rlibs`** should fail with a **“Permission denied”** error.  
-   - This confirms the user is restricted to installing packages in their **personal user library** only.  
-
----
-
-✅ **Note:** If you need the user to have administrative rights (e.g., the ability to install packages into the shared library), add them to the **rstudio-admin** group in addition to `rstudio-users`.
-
-### Clean Up  
-
-When finished, remove all resources with:  
+## Teardown
 
 ```bash
 ./destroy.sh
-```  
+```
+
+## Notes
+
+- **Lab only.** RStudio is served over plain HTTP, and the gateway and
+  Windows VM accept SSH, SMB and RDP from `0.0.0.0/0`.
+- Every pod joins the domain when it starts, so replaced pods leave
+  computer accounts behind in AD.
+- The gateway clones **gcp-rstudio-cluster** into the share, not this
+  repository, so `06-utils` under `Z:` comes from that project (the
+  `getNextUID` path above uses it).
+- The node pool doesn't set a service account, so nodes run as the default
+  Compute Engine service account with the `cloud-platform` scope.
+- The old README listed `india` as 10002 and `us` as 10003; the template
+  sets `us` to 10002 and `india` to 10003.
